@@ -12,8 +12,7 @@
   "permissions": ["storage", "notifications"],
   "host_permissions": [
     "https://leetcode.com/*",
-    "https://api.github.com/*",
-    "https://github.com/*"
+    "https://api.github.com/*"
   ],
   "background": {
     "service_worker": "src/background.js",

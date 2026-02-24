@@ -12,12 +12,12 @@
         <img src="../assets/logo.svg" alt="LeetCode to GitHub logo" class="brand-logo" />
         <h1>LeetCode to GitHub</h1>
       </div>
-      <p class="intro">Configure repository and GitHub OAuth for automatic accepted-solution commits.</p>
+      <p class="intro">Configure repository and a Fine-grained PAT for automatic accepted-solution commits.</p>
 
       <form id="settings-form">
         <label>
-          GitHub OAuth Client ID
-          <input id="githubClientId" name="githubClientId" type="text" placeholder="Iv1.xxxxx" required />
+          GitHub Fine-grained PAT
+          <input id="githubPatToken" name="githubPatToken" type="password" placeholder="github_pat_..." required />
         </label>
 
         <label>
@@ -37,8 +37,7 @@
 
         <div class="actions">
           <button type="submit">Save</button>
-          <button type="button" id="connectGithub">Connect GitHub</button>
-          <button type="button" id="logoutGithub">Logout GitHub</button>
+          <button type="button" id="clearPat">Clear PAT</button>
           <button type="button" id="testConnection">Test GitHub Connection</button>
           <button type="button" id="testPush">Test GitHub Push</button>
         </div>
@@ -48,8 +47,8 @@
       <p id="status" class="status" aria-live="polite"></p>
 
       <section class="note">
-        <h2>Output format</h2>
-        <p>Each accepted submission now writes `solution`, `notes.md`, `meta.json`, and updates streak analytics.</p>
+        <h2>Security model</h2>
+        <p>Use a Fine-grained PAT scoped to exactly one repo with only <strong>Contents: Read and write</strong>.</p>
       </section>
     </main>
 

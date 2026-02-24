@@ -1,12 +1,12 @@
 const DEFAULT_CONFIG = {
   repoFullName: "",
   branch: "main",
-  baseFolder: "leetcode",
-  githubClientId: ""
+  baseFolder: "leetcode"
 };
 
-const TOKEN_STORAGE_KEY = "githubOAuthToken";
-const TOKEN_META_STORAGE_KEY = "githubOAuthTokenMeta";
+const GITHUB_PAT_STORAGE_KEY = "githubPatToken";
+const LEGACY_OAUTH_TOKEN_STORAGE_KEY = "githubOAuthToken";
+const LEGACY_OAUTH_META_STORAGE_KEY = "githubOAuthTokenMeta";
 const ANALYTICS_EVENTS_STORAGE_KEY = "lc2ghAnalyticsEvents";
 
 const README_INDEX_START = "<!-- LC2GH_INDEX_START -->";
@@ -16,13 +16,20 @@ const README_ANALYTICS_END = "<!-- LC2GH_ANALYTICS_END -->";
 
 const processedSubmissionIds = new Set();
 
-chrome.storage.sync.remove(["githubToken", "aiNotesEnabled", "aiModel"]);
+chrome.storage.sync.remove(["githubToken", "githubClientId", "aiNotesEnabled", "aiModel"]);
 chrome.storage.local.remove(["aiApiKey", "openaiApiKey"]);
+chrome.storage.local.get([GITHUB_PAT_STORAGE_KEY, LEGACY_OAUTH_TOKEN_STORAGE_KEY], (saved) => {
+  if (!saved[GITHUB_PAT_STORAGE_KEY] && saved[LEGACY_OAUTH_TOKEN_STORAGE_KEY]) {
+    chrome.storage.local.set({ [GITHUB_PAT_STORAGE_KEY]: saved[LEGACY_OAUTH_TOKEN_STORAGE_KEY] }, () => {
+      chrome.storage.local.remove([LEGACY_OAUTH_TOKEN_STORAGE_KEY, LEGACY_OAUTH_META_STORAGE_KEY]);
+    });
+  }
+});
 
 chrome.runtime.onInstalled.addListener(() => {
   chrome.storage.sync.get(DEFAULT_CONFIG, (saved) => {
     chrome.storage.sync.set({ ...DEFAULT_CONFIG, ...saved }, () => {
-      chrome.storage.sync.remove(["githubToken", "aiNotesEnabled", "aiModel"]);
+      chrome.storage.sync.remove(["githubToken", "githubClientId", "aiNotesEnabled", "aiModel"]);
     });
   });
 });
@@ -53,20 +60,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
 
-  if (message?.type === "start_github_device_flow") {
-    startGitHubDeviceFlow()
-      .then((details) => sendResponse({ ok: true, details }))
-      .catch((error) => sendResponse({ ok: false, error: error.message }));
-    return true;
-  }
-
-  if (message?.type === "poll_github_device_flow" && message?.deviceCode) {
-    pollGitHubDeviceFlow(message.deviceCode)
-      .then((result) => sendResponse({ ok: true, result }))
-      .catch((error) => sendResponse({ ok: false, error: error.message }));
-    return true;
-  }
-
   if (message?.type === "get_auth_status") {
     getAuthStatus()
       .then((details) => sendResponse({ ok: true, details }))
@@ -74,8 +67,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
 
-  if (message?.type === "logout_github") {
-    logoutGitHub()
+  if (message?.type === "clear_github_pat") {
+    clearGitHubPat()
       .then(() => sendResponse({ ok: true }))
       .catch((error) => sendResponse({ ok: false, error: error.message }));
     return true;
@@ -110,7 +103,6 @@ async function handleAcceptedSubmission(submission) {
   const folder = trimSlashes(config.baseFolder || "leetcode");
   const problemDir = folder ? `${folder}/${slug}-${safeTitle}` : `${slug}-${safeTitle}`;
   const solutionPath = `${problemDir}/solution.${ext}`;
-  const notesPath = `${problemDir}/notes.md`;
   const nowIso = new Date().toISOString();
 
   const solutionContent = buildCodeFile({ title, problemUrl, language, code: submission.typedCode });
@@ -128,16 +120,6 @@ async function handleAcceptedSubmission(submission) {
     notify("LeetCode to GitHub", `Skipped unchanged: ${title}`);
     return { status: "skipped_unchanged", title, path: solutionPath };
   }
-
-  await createFileIfMissingInGitHub({
-    token,
-    owner: ownerRepo.owner,
-    repo: ownerRepo.repo,
-    branch: config.branch,
-    path: notesPath,
-    content: buildNotesTemplate({ title, problemUrl, language, generatedAt: nowIso }),
-    commitMessage: `Notes template: ${title} (${slug})`
-  });
 
   const analytics = await recordAndBuildAnalytics({
     submissionId,
@@ -229,88 +211,6 @@ async function testGitHubPush() {
   return { path, repo: config.repoFullName, branch: config.branch };
 }
 
-async function startGitHubDeviceFlow() {
-  const config = await getConfig();
-  if (!config.githubClientId) {
-    throw new Error("Missing GitHub OAuth Client ID in extension options.");
-  }
-
-  const response = await fetch("https://github.com/login/device/code", {
-    method: "POST",
-    headers: {
-      Accept: "application/json",
-      "Content-Type": "application/x-www-form-urlencoded"
-    },
-    body: new URLSearchParams({
-      client_id: config.githubClientId,
-      scope: "repo"
-    })
-  });
-
-  const json = await response.json();
-  if (!response.ok || json.error) {
-    throw new Error(json.error_description || `Device flow start failed (${response.status})`);
-  }
-
-  return {
-    deviceCode: json.device_code,
-    userCode: json.user_code,
-    verificationUri: json.verification_uri,
-    verificationUriComplete: json.verification_uri_complete,
-    interval: Number(json.interval || 5),
-    expiresIn: Number(json.expires_in || 900)
-  };
-}
-
-async function pollGitHubDeviceFlow(deviceCode) {
-  const config = await getConfig();
-  if (!config.githubClientId) {
-    throw new Error("Missing GitHub OAuth Client ID in extension options.");
-  }
-
-  const response = await fetch("https://github.com/login/oauth/access_token", {
-    method: "POST",
-    headers: {
-      Accept: "application/json",
-      "Content-Type": "application/x-www-form-urlencoded"
-    },
-    body: new URLSearchParams({
-      client_id: config.githubClientId,
-      device_code: String(deviceCode),
-      grant_type: "urn:ietf:params:oauth:grant-type:device_code"
-    })
-  });
-
-  const json = await response.json();
-  if (!response.ok) {
-    throw new Error(json.error_description || `OAuth polling failed (${response.status})`);
-  }
-
-  if (json.error) {
-    if (json.error === "authorization_pending") return { status: "pending" };
-    if (json.error === "slow_down") return { status: "slow_down" };
-    if (json.error === "expired_token") return { status: "expired", message: "Device code expired. Start again." };
-    if (json.error === "access_denied") return { status: "denied", message: "Authorization was denied." };
-    return { status: "error", message: json.error_description || json.error };
-  }
-
-  const accessToken = json.access_token;
-  if (!accessToken) {
-    return { status: "error", message: "No access token returned." };
-  }
-
-  await chrome.storage.local.set({
-    [TOKEN_STORAGE_KEY]: accessToken,
-    [TOKEN_META_STORAGE_KEY]: {
-      tokenType: json.token_type || "bearer",
-      scope: json.scope || ""
-    }
-  });
-
-  const auth = await getAuthStatus();
-  return { status: "authorized", username: auth.username || null };
-}
-
 async function getAuthStatus() {
   const token = await getGitHubToken();
   if (!token) {
@@ -323,7 +223,7 @@ async function getAuthStatus() {
   });
 
   if (!response.ok) {
-    await chrome.storage.local.remove([TOKEN_STORAGE_KEY, TOKEN_META_STORAGE_KEY]);
+    await chrome.storage.local.remove([GITHUB_PAT_STORAGE_KEY]);
     return { authenticated: false };
   }
 
@@ -331,8 +231,8 @@ async function getAuthStatus() {
   return { authenticated: true, username: user.login || null };
 }
 
-async function logoutGitHub() {
-  await chrome.storage.local.remove([TOKEN_STORAGE_KEY, TOKEN_META_STORAGE_KEY]);
+async function clearGitHubPat() {
+  await chrome.storage.local.remove([GITHUB_PAT_STORAGE_KEY, LEGACY_OAUTH_TOKEN_STORAGE_KEY, LEGACY_OAUTH_META_STORAGE_KEY]);
 }
 
 async function recordAndBuildAnalytics(event) {
@@ -645,36 +545,6 @@ function buildCodeFile({ title, problemUrl, language, code }) {
   return `${header}${code || ""}\n`;
 }
 
-function buildNotesTemplate({ title, problemUrl, language, generatedAt }) {
-  return [
-    `# Notes: ${title}`,
-    "",
-    `- Problem: ${problemUrl}`,
-    `- Language: ${language}`,
-    `- Created: ${generatedAt}`,
-    "",
-    "## Approach",
-    "- ",
-    "",
-    "## Complexity",
-    "- Time: ",
-    "- Space: ",
-    "",
-    "## Edge Cases",
-    "- "
-  ].join("\n") + "\n";
-}
-
-async function createFileIfMissingInGitHub({ token, owner, repo, branch, path, content, commitMessage }) {
-  const existing = await getExistingFileInfo({ token, owner, repo, branch, path });
-  if (existing) {
-    return { created: false, path };
-  }
-
-  await upsertFileInGitHub({ token, owner, repo, branch, path, content, commitMessage });
-  return { created: true, path };
-}
-
 async function upsertFileInGitHub({ token, owner, repo, branch, path, content, commitMessage }) {
   const existing = await getExistingFileInfo({ token, owner, repo, branch, path });
   if (existing && existing.content === content) {
@@ -924,8 +794,8 @@ function getGitHubApiHeaders(token) {
 
 function getGitHubToken() {
   return new Promise((resolve) => {
-    chrome.storage.local.get([TOKEN_STORAGE_KEY], (saved) => {
-      resolve(saved[TOKEN_STORAGE_KEY] || "");
+    chrome.storage.local.get([GITHUB_PAT_STORAGE_KEY], (saved) => {
+      resolve(saved[GITHUB_PAT_STORAGE_KEY] || "");
     });
   });
 }
@@ -933,7 +803,7 @@ function getGitHubToken() {
 async function requireGitHubToken() {
   const token = await getGitHubToken();
   if (!token) {
-    throw new Error("GitHub not connected. Use 'Connect GitHub' in extension options.");
+    throw new Error("Missing GitHub PAT. Set a Fine-grained PAT in extension options.");
   }
   return token;
 }
