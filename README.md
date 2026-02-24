@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # LeetCode to GitHub Auto Push (Chrome Extension)
 
 This extension listens for accepted LeetCode submissions and auto-commits your code to GitHub.
@@ -45,3 +46,6 @@ This extension listens for accepted LeetCode submissions and auto-commits your c
 - You must be logged into LeetCode in the same browser profile.
 - Use `Test GitHub Connection` and `Test GitHub Push` in options for diagnostics.
 - View service worker logs from `chrome://extensions` for troubleshooting.
+=======
+# LeetCode-To-Github-Auto-Push
+>>>>>>> 0466b87b0e340cfcd233ee84320dbe814374fd70
