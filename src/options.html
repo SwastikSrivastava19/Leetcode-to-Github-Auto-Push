@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>LeetCode to GitHub Settings</title>
+    <link rel="stylesheet" href="options.css" />
+  </head>
+  <body>
+    <main class="wrap">
+      <div class="brand">
+        <img src="../assets/logo.svg" alt="LeetCode to GitHub logo" class="brand-logo" />
+        <h1>LeetCode to GitHub</h1>
+      </div>
+      <p class="intro">Configure repository and GitHub OAuth for automatic accepted-solution commits.</p>
+
+      <form id="settings-form">
+        <label>
+          GitHub OAuth Client ID
+          <input id="githubClientId" name="githubClientId" type="text" placeholder="Iv1.xxxxx" required />
+        </label>
+
+        <label>
+          Repository (owner/repo)
+          <input id="repoFullName" name="repoFullName" type="text" placeholder="yourname/leetcode-solutions" required />
+        </label>
+
+        <label>
+          Branch
+          <input id="branch" name="branch" type="text" placeholder="main" />
+        </label>
+
+        <label>
+          Folder Path
+          <input id="baseFolder" name="baseFolder" type="text" placeholder="leetcode" />
+        </label>
+
+        <div class="actions">
+          <button type="submit">Save</button>
+          <button type="button" id="connectGithub">Connect GitHub</button>
+          <button type="button" id="logoutGithub">Logout GitHub</button>
+          <button type="button" id="testConnection">Test GitHub Connection</button>
+          <button type="button" id="testPush">Test GitHub Push</button>
+        </div>
+      </form>
+
+      <p id="authStatus" class="auth-status" aria-live="polite"></p>
+      <p id="status" class="status" aria-live="polite"></p>
+
+      <section class="note">
+        <h2>Output format</h2>
+        <p>Each accepted submission now writes `solution`, `notes.md`, `meta.json`, and updates streak analytics.</p>
+      </section>
+    </main>
+
+    <script src="options.js" type="module"></script>
+  </body>
+</html>

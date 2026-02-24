@@ -1,0 +1,129 @@
+:root {
+  --bg: #f6f7fb;
+  --card: #ffffff;
+  --text: #1d2433;
+  --muted: #5a657a;
+  --border: #d8deea;
+  --accent: #0e7a53;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+  color: var(--text);
+  background: radial-gradient(circle at top right, #e6f6ef 0%, var(--bg) 45%);
+}
+
+.wrap {
+  max-width: 760px;
+  margin: 36px auto;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 24px;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.brand-logo {
+  width: 42px;
+  height: 42px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: #fff;
+}
+
+h1 {
+  margin-top: 0;
+  margin-bottom: 0;
+}
+
+.intro {
+  color: var(--muted);
+}
+
+form {
+  display: grid;
+  gap: 14px;
+  margin-top: 18px;
+}
+
+label {
+  display: grid;
+  gap: 6px;
+  font-weight: 600;
+}
+
+input {
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  font-size: 14px;
+}
+
+button {
+  margin-top: 8px;
+  width: fit-content;
+  padding: 10px 16px;
+  border: none;
+  border-radius: 8px;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+#testConnection {
+  background: #1d4f8f;
+}
+
+#testPush {
+  background: #8b3d00;
+}
+
+#connectGithub {
+  background: #5b21b6;
+}
+
+#logoutGithub {
+  background: #4b5563;
+}
+
+.auth-status {
+  margin-top: 12px;
+  min-height: 18px;
+  font-weight: 700;
+}
+
+.status {
+  margin-top: 12px;
+  min-height: 18px;
+  font-weight: 600;
+}
+
+.note {
+  margin-top: 18px;
+  border-top: 1px solid var(--border);
+  padding-top: 14px;
+}
+
+@media (max-width: 640px) {
+  .wrap {
+    margin: 12px;
+    padding: 16px;
+  }
+}
