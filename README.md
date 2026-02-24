@@ -9,9 +9,7 @@ This extension listens for accepted LeetCode submissions and auto-commits your c
 - Tracks progress analytics in local extension storage.
 - Writes analytics to repo at `leetcode/analytics/progress.json`.
 - Updates `README.md` with:
-  - Solutions index table
   - Daily streak and progress analytics section
-  - Revision queue + recommended next practice topics
 - Skips duplicate commits when solution content is unchanged.
 
 ## Publish-safe authentication

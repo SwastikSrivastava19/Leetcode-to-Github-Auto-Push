@@ -9,8 +9,6 @@ const LEGACY_OAUTH_TOKEN_STORAGE_KEY = "githubOAuthToken";
 const LEGACY_OAUTH_META_STORAGE_KEY = "githubOAuthTokenMeta";
 const ANALYTICS_EVENTS_STORAGE_KEY = "lc2ghAnalyticsEvents";
 
-const README_INDEX_START = "<!-- LC2GH_INDEX_START -->";
-const README_INDEX_END = "<!-- LC2GH_INDEX_END -->";
 const README_ANALYTICS_START = "<!-- LC2GH_ANALYTICS_START -->";
 const README_ANALYTICS_END = "<!-- LC2GH_ANALYTICS_END -->";
 
@@ -116,10 +114,35 @@ async function handleAcceptedSubmission(submission) {
     commitMessage: `LeetCode: ${title} (${slug})`
   });
 
-  if (!solutionResult.updated) {
-    notify("LeetCode to GitHub", `Skipped unchanged: ${title}`);
-    return { status: "skipped_unchanged", title, path: solutionPath };
-  }
+  const solutionUpdated = Boolean(solutionResult.updated);
+
+  await deleteFileInGitHubIfExists({
+    token,
+    owner: ownerRepo.owner,
+    repo: ownerRepo.repo,
+    branch: config.branch,
+    path: `${problemDir}/meta.json`,
+    commitMessage: `Cleanup legacy file: ${title} (${slug})`
+  });
+
+  await deleteFileInGitHubIfExists({
+    token,
+    owner: ownerRepo.owner,
+    repo: ownerRepo.repo,
+    branch: config.branch,
+    path: `${problemDir}/notes.md`,
+    commitMessage: `Cleanup legacy file: ${title} (${slug})`
+  });
+
+  const revisionPlanPath = folder ? `${folder}/analytics/revision-plan.md` : "analytics/revision-plan.md";
+  await deleteFileInGitHubIfExists({
+    token,
+    owner: ownerRepo.owner,
+    repo: ownerRepo.repo,
+    branch: config.branch,
+    path: revisionPlanPath,
+    commitMessage: `Cleanup legacy revision plan: ${title} (${slug})`
+  });
 
   const analytics = await recordAndBuildAnalytics({
     submissionId,
@@ -147,19 +170,13 @@ async function handleAcceptedSubmission(submission) {
     owner: ownerRepo.owner,
     repo: ownerRepo.repo,
     branch: config.branch,
-    indexEntry: {
-      title,
-      problemUrl,
-      language,
-      path: solutionPath,
-      updatedAt: nowIso
-    },
+    title,
     analytics
   });
 
   notify("LeetCode to GitHub", `Pushed: ${title}`);
   return {
-    status: "pushed",
+    status: solutionUpdated ? "pushed" : "solution_unchanged_analytics_updated",
     title,
     path: solutionPath,
     currentStreak: analytics.currentStreak,
@@ -242,7 +259,7 @@ async function recordAndBuildAnalytics(event) {
 
   const list = Array.isArray(saved) ? saved : [];
   const next = list.filter((item) => item.submissionId !== event.submissionId);
-  const day = event.timestamp.slice(0, 10);
+  const day = getLocalDayKey(new Date(event.timestamp));
   next.push({
     submissionId: event.submissionId,
     slug: event.slug,
@@ -273,13 +290,11 @@ function buildAnalyticsSummary(events) {
     topicCounts.set(topic, (topicCounts.get(topic) || 0) + 1);
   }
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = getLocalDayKey(new Date());
   const currentStreak = computeCurrentStreak(dayCounts, today);
   const longestStreak = computeLongestStreak(dayCounts);
   const last7Days = buildLast7Days(dayCounts);
   const recentProblems = buildRecentProblems(sorted);
-  const revisionQueue = buildRevisionQueue(sorted, today);
-  const recommendations = buildRecommendations(topicCounts);
 
   return {
     generatedAt: new Date().toISOString(),
@@ -291,9 +306,7 @@ function buildAnalyticsSummary(events) {
     languageBreakdown: Object.fromEntries([...langCounts.entries()].sort((a, b) => b[1] - a[1])),
     topicBreakdown: Object.fromEntries([...topicCounts.entries()].sort((a, b) => b[1] - a[1])),
     last7Days,
-    recentProblems,
-    revisionQueue,
-    recommendations
+    recentProblems
   };
 }
 
@@ -322,8 +335,8 @@ function buildLast7Days(dayCounts) {
   const today = new Date();
   for (let i = 6; i >= 0; i -= 1) {
     const d = new Date(today);
-    d.setUTCDate(today.getUTCDate() - i);
-    const key = d.toISOString().slice(0, 10);
+    d.setDate(today.getDate() - i);
+    const key = getLocalDayKey(d);
     out.push({ date: key, count: dayCounts.get(key) || 0 });
   }
   return out;
@@ -331,12 +344,11 @@ function buildLast7Days(dayCounts) {
 
 function computeCurrentStreak(dayCounts, todayKey) {
   let streak = 0;
-  const d = new Date(`${todayKey}T00:00:00.000Z`);
+  let key = todayKey;
   while (true) {
-    const key = d.toISOString().slice(0, 10);
     if (!dayCounts.get(key)) break;
     streak += 1;
-    d.setUTCDate(d.getUTCDate() - 1);
+    key = addDaysIso(key, -1);
   }
   return streak;
 }
@@ -349,9 +361,7 @@ function computeLongestStreak(dayCounts) {
   let current = 1;
 
   for (let i = 1; i < days.length; i += 1) {
-    const prev = new Date(`${days[i - 1]}T00:00:00.000Z`);
-    prev.setUTCDate(prev.getUTCDate() + 1);
-    const expected = prev.toISOString().slice(0, 10);
+    const expected = addDaysIso(days[i - 1], 1);
 
     if (days[i] === expected) {
       current += 1;
@@ -392,84 +402,11 @@ function inferTopic(title, slug) {
   return "misc";
 }
 
-function buildRecommendations(topicCounts) {
-  const baseline = [
-    { topic: "array", query: "array" },
-    { topic: "string", query: "string" },
-    { topic: "hash-map", query: "hash map" },
-    { topic: "two-pointers", query: "two pointers" },
-    { topic: "sliding-window", query: "sliding window" },
-    { topic: "binary-search", query: "binary search" },
-    { topic: "tree", query: "tree" },
-    { topic: "graph", query: "graph" },
-    { topic: "dp", query: "dynamic programming" },
-    { topic: "greedy", query: "greedy" }
-  ];
-
-  const scored = baseline.map((item) => ({
-    ...item,
-    solved: topicCounts.get(item.topic) || 0
-  }));
-
-  scored.sort((a, b) => a.solved - b.solved);
-  return scored.slice(0, 5).map((item) => ({
-    topic: item.topic,
-    solved: item.solved,
-    suggestion: `Practice more ${item.topic} problems`,
-    url: `https://leetcode.com/problemset/?search=${encodeURIComponent(item.query)}`
-  }));
-}
-
-function buildRevisionQueue(sortedEvents, todayKey) {
-  const perProblem = new Map();
-  for (const e of sortedEvents) {
-    const curr = perProblem.get(e.slug);
-    if (!curr) {
-      perProblem.set(e.slug, {
-        slug: e.slug,
-        title: e.title,
-        problemUrl: e.problemUrl,
-        solutionPath: e.solutionPath,
-        attempts: 1,
-        lastDay: e.day
-      });
-    } else {
-      curr.attempts += 1;
-      curr.lastDay = e.day;
-    }
-  }
-
-  const queue = [];
-  for (const item of perProblem.values()) {
-    const intervalDays = item.attempts >= 4 ? 7 : item.attempts === 3 ? 3 : item.attempts === 2 ? 1 : 0;
-    const dueDate = addDaysIso(item.lastDay, intervalDays);
-    const dueInDays = diffIsoDays(todayKey, dueDate);
-    queue.push({
-      slug: item.slug,
-      title: item.title,
-      problemUrl: item.problemUrl,
-      solutionPath: item.solutionPath,
-      attempts: item.attempts,
-      nextReviewDate: dueDate,
-      dueInDays,
-      status: dueInDays <= 0 ? "due" : "upcoming"
-    });
-  }
-
-  queue.sort((a, b) => a.dueInDays - b.dueInDays);
-  return queue.slice(0, 25);
-}
-
 function addDaysIso(day, daysToAdd) {
-  const d = new Date(`${day}T00:00:00.000Z`);
+  const [year, month, date] = String(day).split("-").map(Number);
+  const d = new Date(Date.UTC(year, (month || 1) - 1, date || 1));
   d.setUTCDate(d.getUTCDate() + daysToAdd);
   return d.toISOString().slice(0, 10);
-}
-
-function diffIsoDays(fromDay, toDay) {
-  const a = new Date(`${fromDay}T00:00:00.000Z`);
-  const b = new Date(`${toDay}T00:00:00.000Z`);
-  return Math.round((b.getTime() - a.getTime()) / 86400000);
 }
 
 function validateConfig(config) {
@@ -572,6 +509,34 @@ async function upsertFileInGitHub({ token, owner, repo, branch, path, content, c
   return { updated: true, path };
 }
 
+async function deleteFileInGitHubIfExists({ token, owner, repo, branch, path, commitMessage }) {
+  const existing = await getExistingFileInfo({ token, owner, repo, branch, path });
+  if (!existing?.sha) {
+    return false;
+  }
+
+  const url = `https://api.github.com/repos/${owner}/${repo}/contents/${encodeURIComponent(path).replace(/%2F/g, "/")}`;
+  const response = await fetch(url, {
+    method: "DELETE",
+    headers: {
+      ...getGitHubApiHeaders(token),
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      message: commitMessage,
+      sha: existing.sha,
+      branch
+    })
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`GitHub delete failed (${response.status}): ${text}`);
+  }
+
+  return true;
+}
+
 async function getExistingFileInfo({ token, owner, repo, branch, path }) {
   const url = `https://api.github.com/repos/${owner}/${repo}/contents/${encodeURIComponent(path).replace(/%2F/g, "/")}?ref=${encodeURIComponent(branch)}`;
   const response = await fetch(url, {
@@ -595,12 +560,12 @@ async function getExistingFileInfo({ token, owner, repo, branch, path }) {
   };
 }
 
-async function updateReadmeSections({ token, owner, repo, branch, indexEntry, analytics }) {
+async function updateReadmeSections({ token, owner, repo, branch, title, analytics }) {
   const path = "README.md";
   const existing = await getExistingFileInfo({ token, owner, repo, branch, path });
   let current = existing?.content || "# LeetCode Solutions\n";
 
-  current = upsertReadmeIndex(current, indexEntry);
+  current = removeReadmeIndexSection(current);
   current = upsertReadmeAnalytics(current, analytics);
 
   const previous = existing?.content || "# LeetCode Solutions\n";
@@ -615,81 +580,14 @@ async function updateReadmeSections({ token, owner, repo, branch, indexEntry, an
     branch,
     path,
     content: current,
-    commitMessage: `Update README stats: ${indexEntry.title}`
+    commitMessage: `Update README stats: ${title}`
   });
 }
 
-function upsertReadmeIndex(readme, entry) {
-  const existingEntries = parseReadmeIndexEntries(readme);
-  const merged = new Map(existingEntries.map((item) => [item.path, item]));
-  merged.set(entry.path, {
-    title: entry.title,
-    problemUrl: entry.problemUrl,
-    language: entry.language,
-    path: entry.path,
-    updatedAt: entry.updatedAt
-  });
-
-  const entries = Array.from(merged.values()).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
-  const section = buildReadmeIndexSection(entries);
-  const markerRegex = new RegExp(`${README_INDEX_START}[\\s\\S]*?${README_INDEX_END}`, "m");
-
-  if (markerRegex.test(readme)) {
-    return readme.replace(markerRegex, section);
-  }
-
-  const trimmed = readme.trimEnd();
-  return `${trimmed}\n\n${section}\n`;
-}
-
-function parseReadmeIndexEntries(readme) {
-  const markerRegex = new RegExp(`${README_INDEX_START}[\\s\\S]*?${README_INDEX_END}`, "m");
-  const match = readme.match(markerRegex);
-  if (!match) return [];
-
-  const lines = match[0].split("\n");
-  const rows = lines.filter((line) => line.startsWith("| ["));
-  const entries = [];
-
-  for (const row of rows) {
-    const parts = row.split("|").map((part) => part.trim());
-    if (parts.length < 6) continue;
-
-    const problemMatch = parts[1].match(/^\[(.*)\]\((.*)\)$/);
-    const pathMatch = parts[3].match(/^`(.*)`$/);
-    if (!problemMatch || !pathMatch) continue;
-
-    entries.push({
-      title: problemMatch[1],
-      problemUrl: problemMatch[2],
-      language: parts[2],
-      path: pathMatch[1],
-      updatedAt: parts[4]
-    });
-  }
-
-  return entries;
-}
-
-function buildReadmeIndexSection(entries) {
-  const header = [
-    README_INDEX_START,
-    "## LeetCode Solutions Index",
-    "",
-    "| Problem | Language | File | Last Updated (UTC) |",
-    "| --- | --- | --- | --- |"
-  ];
-
-  const rows = entries.map((entry) => {
-    const safeTitle = escapeMd(entry.title);
-    const safeUrl = entry.problemUrl || "https://leetcode.com";
-    const safeLang = escapeMd(String(entry.language || "unknown"));
-    const safePath = escapeMd(entry.path);
-    const safeUpdated = escapeMd(entry.updatedAt);
-    return `| [${safeTitle}](${safeUrl}) | ${safeLang} | \`${safePath}\` | ${safeUpdated} |`;
-  });
-
-  return [...header, ...rows, README_INDEX_END].join("\n");
+function removeReadmeIndexSection(readme) {
+  // Backward cleanup for old versions that added a large index table.
+  const markerRegex = /(?:\n{0,2})<!-- LC2GH_INDEX_START -->[\s\S]*?<!-- LC2GH_INDEX_END -->(?:\n{0,2})/m;
+  return readme.replace(markerRegex, "\n\n").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
 }
 
 function upsertReadmeAnalytics(readme, analytics) {
@@ -717,7 +615,7 @@ function buildReadmeAnalyticsSection(analytics) {
     "",
     "### Last 7 Days",
     "",
-    "| Date (UTC) | Accepted |",
+    "| Date | Accepted |",
     "| --- | --- |"
   ];
 
@@ -733,29 +631,14 @@ function buildReadmeAnalyticsSection(analytics) {
   ];
   const langRows = langs.length ? langs.map(([lang, count]) => `| ${escapeMd(lang)} | ${count} |`) : ["| n/a | 0 |"];
 
-  const recHeader = [
-    "",
-    "### Recommended Next Practice",
-    "",
-    "| Topic | Solved | Suggested Action |",
-    "| --- | --- | --- |"
-  ];
-  const recRows = (analytics.recommendations || []).map(
-    (r) => `| [${escapeMd(r.topic)}](${r.url}) | ${r.solved} | ${escapeMd(r.suggestion)} |`
-  );
+  return [...top, ...days, ...langHeader, ...langRows, README_ANALYTICS_END].join("\n");
+}
 
-  const revHeader = [
-    "",
-    "### Revision Queue",
-    "",
-    "| Problem | Next Review (UTC) | Status |",
-    "| --- | --- | --- |"
-  ];
-  const revRows = (analytics.revisionQueue || [])
-    .slice(0, 10)
-    .map((r) => `| [${escapeMd(r.title)}](${r.problemUrl}) | ${r.nextReviewDate} | ${r.status} |`);
-
-  return [...top, ...days, ...langHeader, ...langRows, ...recHeader, ...recRows, ...revHeader, ...revRows, README_ANALYTICS_END].join("\n");
+function getLocalDayKey(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 function escapeMd(value) {
